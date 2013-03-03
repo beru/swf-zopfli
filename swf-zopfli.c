@@ -24,20 +24,26 @@ decompress. Decompression can be done by any standard gzip, zlib or deflate
 decompressor.
 */
 
+/*
+ swf-Zopfli compresses Macromedia Flash SWF file.
+ The following conditions must be met.
+ Signature byte of SWF file header must be "C" or "F".
+ Version field of SWF file header must be equal or greater than 6.
+
+Author: berupon@gmail.com
+*/
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "deflate.h"
-#include "gzip_container.h"
 #include "zlib_container.h"
 
 /*
 Loads a file into a memory array.
 */
-static void LoadFile(const char* filename,
-                     unsigned char** out, size_t* outsize) {
+static void LoadFile(const char* filename, unsigned char** out, size_t* outsize) {
   FILE* file;
 
   *out = 0;
@@ -65,30 +71,21 @@ static void LoadFile(const char* filename,
   fclose(file);
 }
 
-/*
-Saves a file from a memory array, overwriting the file if it existed.
-*/
-static void SaveFile(const char* filename,
-                     const unsigned char* in, size_t insize) {
-  FILE* file = fopen(filename, "wb" );
-  assert(file);
-  fwrite((char*)in, 1, insize, file);
-  fclose(file);
-}
+#pragma pack(push, 1)
+typedef struct {
+  char signatures[3];
+  unsigned char version;
+  unsigned int fileLength;
+}SWFHeader;
+#pragma pack(pop)
 
-typedef enum {
-  OUTPUT_GZIP,
-  OUTPUT_ZLIB,
-  OUTPUT_DEFLATE
-} OutputType;
+#define MINIZ_HEADER_FILE_ONLY
+#include "miniz.c"
 
 /*
-outfilename: filename to write output to, or 0 to write to stdout instead
+outfilename: filename to write output to
 */
-void CompressFile(const Options* options,
-                  OutputType output_type,
-                  const char* infilename,
-                  const char* outfilename) {
+void CompressFile(const Options* options, const char* infilename, const char* outfilename) {
   unsigned char* in;
   size_t insize;
   unsigned char* out = 0;
@@ -98,28 +95,51 @@ void CompressFile(const Options* options,
     fprintf(stderr, "Invalid filename: %s\n", infilename);
     return;
   }
-  if (output_type == OUTPUT_GZIP) {
-    GzipCompress(options, in, insize, &out, &outsize);
-  } else if (output_type == OUTPUT_ZLIB) {
-    ZlibCompress(options, in, insize, &out, &outsize);
-  } else if (output_type == OUTPUT_DEFLATE) {
-    unsigned char bp = 0;
-    Deflate(options, 2 /* Dynamic block */, 1, in, insize, &bp, &out, &outsize);
-  } else {
-    assert(0);
-  }
-  if (outfilename) {
-    SaveFile(outfilename, out, outsize);
-  } else {
-    size_t i;
-    for (i = 0; i < outsize; i++) {
-      /* Works only if terminal does not convert newlines. */
-      printf("%c", out[i]);
-    }
-  }
-
-  free(out);
-  free(in);
+	
+	// God forgives 4 space tab...
+	{
+		SWFHeader header = *(const SWFHeader*)in;
+		const char s0 = header.signatures[0];
+		unsigned char* wrk;
+		size_t wrkSize;
+		if (s0 == 'F' || s0 == 'C') {
+			if (header.version < 6) {
+				free(in);
+				fprintf(stderr, "SWF version must be equal or greater than 6\n");
+				return;
+			}
+			wrkSize = header.fileLength - sizeof(SWFHeader);
+			wrk = malloc(wrkSize);
+			// zlib compressed
+			if (s0 == 'C') {
+				// decompress zlib data
+				int ret = mz_uncompress(wrk, &wrkSize, in+sizeof(header), insize-sizeof(SWFHeader));
+				if (ret != MZ_OK) {
+					fprintf(stderr, "Failed to uncompress zlib data: %s\n", mz_error(ret));
+				}
+			}else {
+				wrk = in + sizeof(header);
+				wrkSize = insize-sizeof(SWFHeader);
+			}
+			{
+				FILE* file = fopen(outfilename, "wb" );
+				assert(file);
+				header.signatures[0] = 'C';
+				fwrite(&header, sizeof(header), 1, file);
+				ZlibCompress(options, wrk, wrkSize, &out, &outsize);
+				fwrite((char*)out, 1, outsize, file);
+				fclose(file);
+			}
+			free(out);
+			free(in);
+			if (s0 == 'C') {
+				free(wrk);
+			}
+		}else {
+			free(in);
+			fprintf(stderr, "Unsupported SWF signature: %c\n", s0);
+		}
+	}
 }
 
 /*
@@ -141,18 +161,12 @@ static char StringsEqual(const char* str1, const char* str2) {
 int main(int argc, char* argv[]) {
   Options options;
   const char* filename = 0;
-  int output_to_stdout = 0;
   int i;
-  OutputType output_type = OUTPUT_GZIP;
 
   InitOptions(&options);
 
   for (i = 1; i < argc; i++) {
     if (StringsEqual(argv[i], "-v")) options.verbose = 1;
-    else if (StringsEqual(argv[i], "-c")) output_to_stdout = 1;
-    else if (StringsEqual(argv[i], "--deflate")) output_type = OUTPUT_DEFLATE;
-    else if (StringsEqual(argv[i], "--zlib")) output_type = OUTPUT_ZLIB;
-    else if (StringsEqual(argv[i], "--gzip")) output_type = OUTPUT_GZIP;
     else if (StringsEqual(argv[i], "--i5")) options.numiterations = 5;
     else if (StringsEqual(argv[i], "--i10")) options.numiterations = 10;
     else if (StringsEqual(argv[i], "--i15")) options.numiterations = 15;
@@ -163,15 +177,11 @@ int main(int argc, char* argv[]) {
     else if (StringsEqual(argv[i], "--i500")) options.numiterations = 500;
     else if (StringsEqual(argv[i], "--i1000")) options.numiterations = 1000;
     else if (StringsEqual(argv[i], "-h")) {
-      fprintf(stderr, "Usage: zopfli [OPTION]... FILE\n"
+      fprintf(stderr,
+          "Usage: swf-zopfli [OPTION]... FILE\n"
           "  -h    gives this help\n"
-          "  -c    write the result on standard output, instead of disk"
-          " filename + '.gz'\n"
           "  -v    verbose mode\n"
-          "  --gzip  output to gzip format (default)\n"
-          "  --deflate  output to deflate format instead of gzip\n"
-          "  --zlib  output to zlib format instead of gzip\n");
-      fprintf(stderr, "  --i5  less compression, but faster\n"
+          "  --i5  less compression, but faster\n"
           "  --i10  less compression, but faster\n"
           "  --i15  default compression, 15 iterations\n"
           "  --i25  more compression, but slower\n"
@@ -188,21 +198,11 @@ int main(int argc, char* argv[]) {
     if (argv[i][0] != '-') {
       char* outfilename;
       filename = argv[i];
-      if (output_to_stdout) {
-        outfilename = 0;
-      } else if (output_type == OUTPUT_GZIP) {
-        outfilename = AddStrings(filename, ".gz");
-      } else if (output_type == OUTPUT_ZLIB) {
-        outfilename = AddStrings(filename, ".zlib");
-      } else if (output_type == OUTPUT_DEFLATE) {
-        outfilename = AddStrings(filename, ".deflate");
-      } else {
-        assert(0);
-      }
+      outfilename = AddStrings(filename, ".zopfli");
       if (options.verbose && outfilename) {
         fprintf(stderr, "Saving to: %s\n", outfilename);
       }
-      CompressFile(&options, output_type, filename, outfilename);
+      CompressFile(&options, filename, outfilename);
       free(outfilename);
     }
   }
