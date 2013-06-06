@@ -114,12 +114,14 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
+				AdditionalIncludeDirectories="../"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
 				DebugInformationFormat="3"
+				ForcedIncludeFiles="stdint.h"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -249,6 +251,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\stdint.h"
+				>
+			</File>
+			<File
 				RelativePath="..\tree.h"
 				>
 			</File>
@@ -262,10 +268,20 @@
 			</File>
 		</Filter>
 		<Filter
-			Name="リソース ファイル"
-			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
-			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
+			Name="swf"
 			>
+			<File
+				RelativePath="..\swf\swf.h"
+				>
+			</File>
+			<File
+				RelativePath="..\swf\swf_processor.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\swf\swf_processor.h"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>
